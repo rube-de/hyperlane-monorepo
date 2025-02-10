@@ -4,12 +4,14 @@ import { Mailbox__factory } from '@hyperlane-xyz/core';
 import {
   ChainMap,
   ChainName,
+  ChainSubmissionStrategy,
   HookConfig,
   HookType,
   HypTokenRouterConfig,
   IsmType,
   MultisigConfig,
   TokenType,
+  TxSubmitterType,
   buildAggregationIsmConfigs,
 } from '@hyperlane-xyz/sdk';
 import { Address, assert, symmetricDifference } from '@hyperlane-xyz/utils';
@@ -76,7 +78,7 @@ export function getRenzoHook(
 const lockboxChain = 'ethereum';
 // over the default 100k to account for xerc20 gas + ISM overhead over the default ISM https://github.com/hyperlane-xyz/hyperlane-monorepo/blob/49f41d9759fd515bfd89e6e22e799c41b27b4119/typescript/sdk/src/router/GasRouterDeployer.ts#L14
 const warpRouteOverheadGas = 200_000;
-const lockbox = '0xC8140dA31E6bCa19b287cC35531c2212763C2059';
+const xERC20ProductionLockbox = '0xC8140dA31E6bCa19b287cC35531c2212763C2059';
 const xERC20: Record<(typeof chainsToDeploy)[number], string> = {
   arbitrum: '0x2416092f143378750bb29b79eD961ab195CcEea5',
   optimism: '0x2416092f143378750bb29b79eD961ab195CcEea5',
@@ -296,6 +298,8 @@ const existingProxyAdmins: ChainMap<{ address: string; owner: string }> = {
 export function getRenzoEZETHWarpConfigGenerator(
   ezEthSafes: Record<string, string>,
   xERC20: Record<(typeof chainsToDeploy)[number], string>,
+  lockbox: string,
+  existingProxyAdmins?: ChainMap<{ address: string; owner: string }>,
 ) {
   return async (): Promise<ChainMap<HypTokenRouterConfig>> => {
     const config = getEnvironmentConfig('mainnet3');
@@ -394,7 +398,7 @@ export function getRenzoEZETHWarpConfigGenerator(
                   ],
                 },
                 hook: getRenzoHook(defaultHook, chain, ezEthSafes[chain]),
-                proxyAdmin: existingProxyAdmins[chain],
+                proxyAdmin: existingProxyAdmins?.[chain] ?? undefined, // when 'undefined' yaml will not include the field
               },
             ];
 
@@ -411,4 +415,30 @@ export function getRenzoEZETHWarpConfigGenerator(
 export const getRenzoEZETHWarpConfig = getRenzoEZETHWarpConfigGenerator(
   ezEthSafes,
   xERC20,
+  xERC20ProductionLockbox,
+  existingProxyAdmins,
 );
+
+// Create a GnosisSafeBuilder Strategy for each safe address
+export function getRenzoGnosisSafeBuilderStrategyConfigGenerator(
+  ezEthSafes: Record<string, string>,
+) {
+  return (): ChainSubmissionStrategy => {
+    return Object.fromEntries(
+      Object.entries(ezEthSafes).map(([chain, safeAddress]) => [
+        chain,
+        {
+          submitter: {
+            type: TxSubmitterType.GNOSIS_TX_BUILDER,
+            version: '1.0',
+            chain,
+            safeAddress,
+          },
+        },
+      ]),
+    );
+  };
+}
+
+export const getRenzoGnosisSafeBuilderStrategyConfig =
+  getRenzoGnosisSafeBuilderStrategyConfigGenerator(ezEthSafes);
